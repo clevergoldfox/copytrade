@@ -3,10 +3,11 @@
 #include <CT_Ledger.mqh>
 
 // ========= Inputs =========
-input double LotMultiplier = 0.01;   // safer default for testing
+input double LotMultiplier = 0.01;
 input int    TimerSeconds  = 1;
 input int    Slippage      = 10;
-input string SymbolMap     = "";     // example: "GOLD=XAUUSD;USDJPY=USDJPY"
+input string SymbolMap     = "";
+input int    ReceiverMagic = 900001;
 
 // ========= Utils =========
 string CT_Trim(string s)
@@ -26,6 +27,7 @@ string CT_Trim(string s)
    return s;
 }
 
+// ================================
 bool CT_SplitKeyValue(string line, string &key, string &val)
 {
    int p = StringFind(line, "=");
@@ -36,6 +38,7 @@ bool CT_SplitKeyValue(string line, string &key, string &val)
    return true;
 }
 
+// ================================
 string CT_MapSymbol(string s)
 {
    if(SymbolMap == "") return s;
@@ -67,6 +70,7 @@ string CT_MapSymbol(string s)
    return s;
 }
 
+// ================================
 double CT_NormalizeLot(string symbol, double lot)
 {
    double minLot  = MarketInfo(symbol, MODE_MINLOT);
@@ -82,6 +86,7 @@ double CT_NormalizeLot(string symbol, double lot)
    return NormalizeDouble(lot, 2);
 }
 
+// ================================
 int CT_ReverseCmd(int cmd)
 {
    if(cmd == OP_BUY)       return OP_SELL;
@@ -110,6 +115,7 @@ struct CT_Event
    int    ticket;
 };
 
+// ================================
 bool CT_ReadEventFile(string relPath, CT_Event &ev)
 {
    int h = FileOpen(relPath, FILE_READ | FILE_TXT);
@@ -129,6 +135,7 @@ bool CT_ReadEventFile(string relPath, CT_Event &ev)
    while(!FileIsEnding(h))
    {
       string line = FileReadString(h);
+
       if(StringFind(line, "=") < 0)
          continue;
 
@@ -152,6 +159,7 @@ bool CT_ReadEventFile(string relPath, CT_Event &ev)
    return (ev.eventId != "" && ev.typeStr != "" && ev.symbol != "" && ev.cmd != -1);
 }
 
+// ================================
 void CT_MoveToFailed(string relPath, string reason)
 {
    FolderCreate("ct_failed");
@@ -186,6 +194,27 @@ void CT_MoveToFailed(string relPath, string reason)
    FileDelete(relPath);
 }
 
+// ================================
+bool CT_AlreadyCopied(const CT_Event &ev)
+{
+   string key = "SRC:" + IntegerToString(ev.senderLogin) + "|T:" + IntegerToString(ev.ticket);
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+
+      if(OrderMagicNumber() != ReceiverMagic)
+         continue;
+
+      if(StringFind(OrderComment(), key) == 0)
+         return true;
+   }
+
+   return false;
+}
+
+// ================================
 bool CT_IsTradeAllowedNow()
 {
    if(!IsTradeAllowed())
@@ -196,13 +225,13 @@ bool CT_IsTradeAllowedNow()
 
    if(IsTradeContextBusy())
    {
-      Print("Receiver: trade context busy");
       return false;
    }
 
    return true;
 }
 
+// ================================
 int CT_ExecuteOpen(const CT_Event &ev)
 {
    string symbol = CT_MapSymbol(ev.symbol);
@@ -214,43 +243,34 @@ int CT_ExecuteOpen(const CT_Event &ev)
    }
 
    int revCmd = CT_ReverseCmd(ev.cmd);
-   double lot = CT_NormalizeLot(symbol, ev.lots * LotMultiplier);
 
-   // Ensure symbol is available
-   if(!SymbolSelect(symbol, true))
+   // market orders only
+   if(revCmd != OP_BUY && revCmd != OP_SELL)
    {
-      Print("Receiver: cannot select symbol ", symbol);
+      Print("Receiver: unsupported reverse cmd=", revCmd);
       return -1;
    }
-   
-   // Wait for price if needed
+
+   double lot = CT_NormalizeLot(symbol, ev.lots * LotMultiplier);
+
    RefreshRates();
-   
+
    double bid = MarketInfo(symbol, MODE_BID);
    double ask = MarketInfo(symbol, MODE_ASK);
-   
+
    if(bid <= 0 || ask <= 0)
    {
       Print("Receiver: waiting for tick for ", symbol);
       return -1;
    }
-   
+
    double price = (revCmd == OP_BUY) ? ask : bid;
 
-   // Margin check
-   int marginCmd = revCmd;
+   // margin check
+   double fm = AccountFreeMarginCheck(symbol, revCmd, lot);
+   int marginErr = GetLastError();
 
-   if(marginCmd != OP_BUY && marginCmd != OP_SELL)
-   {
-      if(marginCmd == OP_BUYLIMIT || marginCmd == OP_BUYSTOP)
-         marginCmd = OP_BUY;
-   
-      if(marginCmd == OP_SELLLIMIT || marginCmd == OP_SELLSTOP)
-         marginCmd = OP_SELL;
-   }
-   
-   double fm = AccountFreeMarginCheck(symbol, marginCmd, lot);
-   if(fm <= 0 || GetLastError() == 134)
+   if(fm <= 0 || marginErr == 134)
    {
       Print("Receiver: not enough margin for ", symbol, " lot=", DoubleToString(lot, 2));
       return -1;
@@ -258,52 +278,50 @@ int CT_ExecuteOpen(const CT_Event &ev)
 
    string comment = "SRC:" + IntegerToString(ev.senderLogin) + "|T:" + IntegerToString(ev.ticket);
 
-   ResetLastError();
-
    int ticket = -1;
 
    for(int attempt = 0; attempt < 10; attempt++)
    {
       int waitCount = 0;
-   
+
       while(IsTradeContextBusy())
       {
          Sleep(200);
          waitCount++;
-   
+
          if(waitCount > 25)
          {
             Print("Receiver: trade context stuck");
             return -1;
          }
       }
-   
+
       RefreshRates();
-   
+
       price = (revCmd == OP_BUY)
          ? MarketInfo(symbol, MODE_ASK)
          : MarketInfo(symbol, MODE_BID);
-   
+
       ResetLastError();
-   
-      ticket = OrderSend(symbol, revCmd, lot, price, Slippage, 0, 0, comment, 0, 0, clrNONE);
-   
+
+      ticket = OrderSend(symbol, revCmd, lot, price, Slippage, 0, 0, comment, ReceiverMagic, 0, clrNONE);
+
       if(ticket > 0)
          return ticket;
-   
+
       int err = GetLastError();
-   
-      Print("Receiver: OrderSend failed attempt=", attempt+1, " err=", err);
-   
+      Print("Receiver: OrderSend failed attempt=", attempt + 1, " err=", err);
+
       if(err != 148)
          break;
-   
+
       Sleep(1000);
    }
-   
+
    return -1;
 }
 
+// ================================
 void CT_ProcessQueue()
 {
    FolderCreate("ct_queue");
@@ -316,20 +334,18 @@ void CT_ProcessQueue()
    if(found == -1)
       return;
 
-   // IMPORTANT:
-   // process only ONE file per timer cycle
    string relPath = "ct_queue\\" + filename;
 
    CT_Event ev;
    if(!CT_ReadEventFile(relPath, ev))
    {
-      Print("Receiver: failed to parse ", relPath);
-      CT_MoveToFailed(relPath, "parse_error");
+      // file may still be being written; retry later
+      Print("Receiver: file not ready yet, will retry later: ", relPath);
       FileFindClose(found);
       return;
    }
 
-   // Duplicate check
+   // ledger duplicate check
    if(CT_LedgerHas(ev.eventId))
    {
       Print("Receiver: already processed, deleting ", ev.eventId);
@@ -338,20 +354,35 @@ void CT_ProcessQueue()
       return;
    }
 
+   // existing copied trade duplicate check
+   if(CT_AlreadyCopied(ev))
+   {
+      Print("Receiver: already copied sender ticket=", ev.ticket, ", deleting ", ev.eventId);
+
+      if(!CT_LedgerHas(ev.eventId))
+         CT_LedgerAppendDone(ev.eventId, 0);
+
+      FileDelete(relPath);
+      FileFindClose(found);
+      return;
+   }
+
    if(ev.typeStr == "OPEN")
    {
+      Sleep(800); // allow sender terminal to finish trade + file write
+
       int rticket = CT_ExecuteOpen(ev);
 
       if(rticket > 0)
       {
          CT_LedgerAppendDone(ev.eventId, rticket);
          FileDelete(relPath);
-         Print("Receiver: OPEN done eventId=", ev.eventId, " rticket=", rticket);
+         Print("Receiver: OPEN done eventId=", ev.eventId, " ticket=", rticket);
       }
       else
       {
          Print("Receiver: OPEN failed eventId=", ev.eventId, " err=", GetLastError());
-         // keep file for retry next timer cycle
+         // keep file for retry
       }
    }
    else
@@ -363,7 +394,7 @@ void CT_ProcessQueue()
    FileFindClose(found);
 }
 
-// ========= EA =========
+// ================================
 int OnInit()
 {
    Print("CopyTrade_Receiver started");
@@ -371,11 +402,13 @@ int OnInit()
    return(INIT_SUCCEEDED);
 }
 
+// ================================
 void OnDeinit(const int reason)
 {
    EventKillTimer();
 }
 
+// ================================
 void OnTimer()
 {
    CT_ProcessQueue();
