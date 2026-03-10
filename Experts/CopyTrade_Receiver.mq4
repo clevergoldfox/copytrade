@@ -101,6 +101,24 @@ int ExecuteOpen(const CT_Event &ev)
    return ticket;
 }
 
+// Find receiver order by sender id in comment (fallback when map is missing)
+int FindReceiverOrderByComment(int senderLogin, int senderTicket)
+{
+   string needComment = "SRC:" + IntegerToString(senderLogin) + "|T:" + IntegerToString(senderTicket);
+   for(int i = 0; i < OrdersTotal(); i++)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderMagicNumber() != ReceiverMagic)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(OrderComment() == needComment)
+         return OrderTicket();
+   }
+   return -1;
+}
+
 int ExecuteClose(const CT_Event &ev)
 {
    Print("Receiver: executing CLOSE");
@@ -109,8 +127,13 @@ int ExecuteClose(const CT_Event &ev)
 
    if(!CT_MapFind(ev.senderLogin, ev.ticket, receiverTicket))
    {
-      Print("Receiver: mapped ticket not found");
-      return -1;
+      receiverTicket = FindReceiverOrderByComment(ev.senderLogin, ev.ticket);
+      if(receiverTicket < 0)
+      {
+         Print("Receiver: mapped ticket not found (senderLogin=", ev.senderLogin, " senderTicket=", ev.ticket, ")");
+         return -1;
+      }
+      Print("Receiver: found order by comment (map was missing) ticket=", receiverTicket);
    }
 
    if(!OrderSelect(receiverTicket, SELECT_BY_TICKET))
@@ -201,6 +224,15 @@ void CT_ProcessQueue()
          FileDelete(path, FILE_COMMON);
 
          Print("Receiver: CLOSE completed");
+      }
+      else
+      {
+         // Orphan CLOSE: no mapped ticket and no order found by comment - consume event to stop infinite retry
+         CT_LedgerAppendDone(ev.eventId, 0);
+
+         FileDelete(path, FILE_COMMON);
+
+         Print("Receiver: CLOSE skipped (no mapped ticket, event consumed to avoid retry loop)");
       }
    }
 
