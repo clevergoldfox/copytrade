@@ -1,181 +1,68 @@
 #property strict
-
 #include <CT_Event.mqh>
 
-input int ScanIntervalSeconds = 1;
-input int ReceiverMagic       = 900001;   // must match receiver EA
+input int    ScanIntervalSeconds = 1;
+input int    ReceiverMagic       = 900001;
+input string QueueFolder         = "ct_queue";
+
+// ===== Storage =====
+int    KnownTickets[5000];
+int    KnownCount = 0;
+
+int    LastTickets[5000];
+string LastSymbols[5000];
+int    LastCount = 0;
 
 
-// ================================
-// Storage
-// ================================
-int KnownTickets[2000];
-int KnownCount = 0;
-int LastTickets[2000];
-int LastCount = 0;
-
-// ================================
+// ===== Check if ticket already processed =====
 bool IsKnownTicket(int ticket)
 {
-   for(int i = 0; i < KnownCount; i++)
-   {
+   for(int i=0;i<KnownCount;i++)
       if(KnownTickets[i] == ticket)
          return true;
-   }
 
    return false;
 }
 
 
-// ================================
-void AddKnownTicket(int ticket)
+// ===== Store new ticket =====
+void AddKnownTicket(int ticket,string symbol)
 {
    if(KnownCount < ArraySize(KnownTickets))
-   {
-      KnownTickets[KnownCount] = ticket;
-      KnownCount++;
-   }
+      KnownTickets[KnownCount++] = ticket;
 
-   if(LastCount < ArraySize(LastTickets))
+   bool exists=false;
+
+   for(int i=0;i<LastCount;i++)
+      if(LastTickets[i]==ticket)
+      {
+         exists=true;
+         break;
+      }
+
+   if(!exists && LastCount < ArraySize(LastTickets))
    {
       LastTickets[LastCount] = ticket;
+      LastSymbols[LastCount] = symbol;
       LastCount++;
    }
 }
 
 
-// ================================
-// Ignore receiver copied trades
-// ================================
+// ===== Detect receiver trades to ignore =====
 bool IsReceiverTrade()
 {
-   // skip receiver magic trades
-   if(OrderMagicNumber() == ReceiverMagic)
+   if(OrderMagicNumber()==ReceiverMagic)
       return true;
 
-   // skip copied trades by comment
-   if(StringFind(OrderComment(), "SRC:") == 0)
+   if(StringFind(OrderComment(),"SRC:")==0)
       return true;
 
    return false;
 }
 
 
-// ================================
-int OnInit()
-{
-   Print("CopyTrade Sender Started");
-
-   EventSetTimer(ScanIntervalSeconds);
-
-   return(INIT_SUCCEEDED);
-}
-
-
-// ================================
-void OnDeinit(const int reason)
-{
-   EventKillTimer();
-}
-
-
-// ================================
-void OnTimer()
-{
-   DetectClosedTrades();
-   ScanOpenTrades();
-}
-
-
-// ================================
-void ScanOpenTrades()
-{
-   int total = OrdersTotal();
-
-   for(int i = 0; i < total; i++)
-   {
-      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
-         continue;
-
-      // only market orders
-      int type = OrderType();
-      if(type != OP_BUY && type != OP_SELL)
-         continue;
-
-      // skip receiver trades
-      if(IsReceiverTrade())
-         continue;
-
-      int ticket = OrderTicket();
-
-      if(IsKnownTicket(ticket))
-         continue;
-
-      AddKnownTicket(ticket);
-
-      GenerateOpenEvent();
-   }
-}
-
-
-// ================================
-void GenerateOpenEvent()
-{
-   int senderLogin = AccountNumber();
-   string senderServer = AccountServer();
-
-   int ticket = OrderTicket();
-   datetime openTime = OrderOpenTime();
-   string symbol = OrderSymbol();
-   double lots = OrderLots();
-   double price = OrderOpenPrice();
-   int cmd = OrderType(); // OP_BUY / OP_SELL
-
-   string eventId =
-      CT_BuildEventId(
-         CT_OPEN,
-         senderLogin,
-         senderServer,
-         ticket,
-         openTime,
-         symbol
-      );
-
-   Print("New OPEN Event: ", eventId);
-
-   bool ok =
-      CT_WriteEventFile(
-         eventId,
-         CT_OPEN,
-         cmd,
-         senderLogin,
-         senderServer,
-         symbol,
-         lots,
-         price,
-         ticket
-      );
-
-   if(!ok)
-      Print("Sender: Failed to write event file: ", eventId);
-}
-
-void DetectClosedTrades()
-{
-   for(int i=0;i<LastCount;i++)
-   {
-      int ticket = LastTickets[i];
-
-      if(!IsTradeStillOpen(ticket))
-      {
-         GenerateCloseEvent(ticket);
-
-         RemoveLastTicket(i);
-         i--;
-      }
-   }
-}
-
+// ===== Check if trade still open =====
 bool IsTradeStillOpen(int ticket)
 {
    for(int i=0;i<OrdersTotal();i++)
@@ -190,21 +77,77 @@ bool IsTradeStillOpen(int ticket)
    return false;
 }
 
+
+// ===== Remove closed ticket =====
 void RemoveLastTicket(int index)
 {
    for(int i=index;i<LastCount-1;i++)
+   {
       LastTickets[i] = LastTickets[i+1];
+      LastSymbols[i] = LastSymbols[i+1];
+   }
 
    LastCount--;
 }
 
-void GenerateCloseEvent(int ticket)
+
+// ===== Generate OPEN event =====
+void GenerateOpenEvent()
 {
-   int senderLogin = AccountNumber();
+   int senderLogin     = AccountNumber();
    string senderServer = AccountServer();
 
-   string symbol = "";
-   datetime closeTime = TimeCurrent();
+   int ticket          = OrderTicket();
+   datetime openTime   = OrderOpenTime();
+   string symbol       = OrderSymbol();
+   double lots         = OrderLots();
+   double price        = OrderOpenPrice();
+   int cmd             = OrderType();
+   
+   Print("Symbol;",symbol);
+
+   string eventId =
+      CT_BuildEventId(
+         CT_OPEN,
+         senderLogin,
+         senderServer,
+         ticket,
+         openTime,
+         symbol
+      );
+
+   Print("Sender: OPEN event ",eventId);
+
+   if(!CT_WriteEventFileCommon(
+      QueueFolder,
+      eventId,
+      CT_OPEN,
+      cmd,
+      senderLogin,
+      senderServer,
+      symbol,
+      lots,
+      price,
+      ticket))
+   {
+      Print("Sender: OPEN event write failed");
+   }
+}
+
+
+// ===== Generate CLOSE event =====
+void GenerateCloseEvent(int ticket,string symbol)
+{
+   if(symbol=="")
+   {
+      Print("Sender: CLOSE skipped (empty symbol) ticket=",ticket);
+      return;
+   }
+
+   int senderLogin     = AccountNumber();
+   string senderServer = AccountServer();
+
+   datetime closeTime  = TimeCurrent();
 
    string eventId =
       CT_BuildEventId(
@@ -216,9 +159,10 @@ void GenerateCloseEvent(int ticket)
          symbol
       );
 
-   Print("New CLOSE Event: ", eventId);
+   Print("Sender: CLOSE event ",eventId);
 
-   CT_WriteEventFile(
+   CT_WriteEventFileCommon(
+      QueueFolder,
       eventId,
       CT_CLOSE,
       0,
@@ -229,4 +173,80 @@ void GenerateCloseEvent(int ticket)
       0,
       ticket
    );
+}
+
+
+// ===== Detect closed trades =====
+void DetectClosedTrades()
+{
+   for(int i=0;i<LastCount;i++)
+   {
+      int ticket = LastTickets[i];
+
+      if(!IsTradeStillOpen(ticket))
+      {
+         GenerateCloseEvent(ticket,LastSymbols[i]);
+
+         RemoveLastTicket(i);
+         i--;
+      }
+   }
+}
+
+
+// ===== Scan open trades =====
+void ScanOpenTrades()
+{
+   for(int i=0;i<OrdersTotal();i++)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
+         continue;
+
+      int type = OrderType();
+
+      if(type!=OP_BUY && type!=OP_SELL)
+         continue;
+
+      if(IsReceiverTrade())
+         continue;
+
+      int ticket = OrderTicket();
+
+      if(IsKnownTicket(ticket))
+         continue;
+
+      string symbol = OrderSymbol();
+
+      AddKnownTicket(ticket,symbol);
+
+      GenerateOpenEvent();
+   }
+}
+
+
+// ===== INIT =====
+int OnInit()
+{
+   Print("CopyTrade_Sender started");
+
+   EventSetTimer(ScanIntervalSeconds);
+
+   return(INIT_SUCCEEDED);
+}
+
+
+// ===== DEINIT =====
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+}
+
+
+// ===== TIMER =====
+void OnTimer()
+{
+   // order important for stability
+   ScanOpenTrades();
+
+   DetectClosedTrades();
 }
