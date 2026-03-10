@@ -3,12 +3,14 @@
 #include <CT_Event.mqh>
 #include <CT_Ledger.mqh>
 #include <CT_Map.mqh>
+#include <CT_Symbol.mqh>
 
 input int TimerSeconds = 1;
 input int Slippage = 10;
 input int ReceiverMagic = 900001;
 input double LotMultiplier = 1.0;
 input string QueueFolder = "ct_queue";
+input string SymbolMapping = "";   // e.g. XAUUSD=GOLD. Comma for multiple. Set on Sender OR Receiver, not both.
 
 struct CT_Event
 {
@@ -70,6 +72,7 @@ int ExecuteOpen(const CT_Event &ev)
 
    RefreshRates();
 
+   string symbolForOrder = CT_SymbolMapLookup(SymbolMapping, ev.symbol);
    double lot = ev.lots * LotMultiplier;
 
    // Invert: Sender BUY -> Receiver SELL, Sender SELL -> Receiver BUY
@@ -77,7 +80,7 @@ int ExecuteOpen(const CT_Event &ev)
    double price = (receiverCmd == OP_BUY) ? Ask : Bid;
 
    int ticket = OrderSend(
-      ev.symbol,
+      symbolForOrder,
       receiverCmd,
       lot,
       price,
@@ -93,7 +96,7 @@ int ExecuteOpen(const CT_Event &ev)
    {
       Print("Receiver: trade opened ticket=", ticket);
 
-      CT_MapAdd(ev.senderLogin, ev.ticket, ticket, ev.symbol);
+      CT_MapAdd(ev.senderLogin, ev.ticket, ticket, symbolForOrder);
    }
    else
    {

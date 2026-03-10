@@ -122,13 +122,23 @@ These can be estimated and implemented separately.
 
 ---
 
-## 8. Summary checklist
+## 8. Symbol delimiter & mapping usage
+
+- **SymbolDelimiter (Sender):** If the sender’s symbol has a suffix (e.g. `XAUUSD-cd`, `USDJPY.oj5k`), set the delimiter (e.g. `-` or `.`). The base symbol (e.g. `XAUUSD`) is sent in the event. No suffix → leave empty.
+- **SymbolMapping:** Use **either** Sender **or** Receiver, not both. Format: `GOLD=XAUUSD` or `XAUUSD=GOLD`; comma for multiple: `GOLD=XAUUSD,SILVER=XAGUSD`.  
+  - Sender side: map “my symbol” → “symbol to put in event” (e.g. `GOLD=XAUUSD` when copying from XM GOLD to GemTrade XAUUSD).  
+  - Receiver side: map “symbol in event” → “my symbol” (e.g. `XAUUSD=GOLD` if the receiver broker uses `GOLD`).  
+  - If the receiver uses a suffixed symbol (e.g. `XAUUSD.oj5k`), set mapping e.g. `XAUUSD=XAUUSD.oj5k` on the receiver.
+
+---
+
+## 9. Summary checklist
 
 | Action | Owner | Done |
 |--------|--------|------|
 | Implement invert (BUY↔SELL) on receiver OPEN | Dev | ☑ |
 | Before OPEN, check existing position for (senderLogin, senderTicket); if exists, skip open and consume event | Dev | ☑ |
-| Add SymbolDelimiter param (Sender + Receiver); normalize symbol on send; use on receive if needed | Dev | ☐ |
-| Add SymbolMapping param; apply on one side only; document | Dev | ☐ |
+| Add SymbolDelimiter param (Sender + Receiver); normalize symbol on send; use on receive if needed | Dev | ☑ |
+| Add SymbolMapping param; apply on one side only; document | Dev | ☑ |
 | Test: gold, invert, no duplicates, delimiter, mapping | Dev | ☐ |
 | Optional: alerts, auto-close, no martingale, entry limit (separate estimate) | Later | ☐ |

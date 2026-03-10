@@ -1,9 +1,12 @@
 #property strict
 #include <CT_Event.mqh>
+#include <CT_Symbol.mqh>
 
 input int    ScanIntervalSeconds = 1;
 input int    ReceiverMagic       = 900001;
 input string QueueFolder         = "ct_queue";
+input string SymbolDelimiter     = "";       // e.g. "-" for XAUUSD-cd, "." for XAUUSD.oj5k. Empty if no suffix.
+input string SymbolMapping      = "";       // e.g. GOLD=XAUUSD. Comma for multiple. Set on Sender OR Receiver, not both.
 
 // ===== Storage =====
 int    KnownTickets[5000];
@@ -99,12 +102,10 @@ void GenerateOpenEvent()
 
    int ticket          = OrderTicket();
    datetime openTime   = OrderOpenTime();
-   string symbol       = OrderSymbol();
+   string symbol       = CT_SymbolMapLookup(SymbolMapping, CT_GetBaseSymbol(OrderSymbol(), SymbolDelimiter));
    double lots         = OrderLots();
    double price        = OrderOpenPrice();
    int cmd             = OrderType();
-   
-   Print("Symbol;",symbol);
 
    string eventId =
       CT_BuildEventId(
@@ -116,7 +117,7 @@ void GenerateOpenEvent()
          symbol
       );
 
-   Print("Sender: OPEN event ",eventId);
+   Print("Sender: OPEN event ", eventId);
 
    if(!CT_WriteEventFileCommon(
       QueueFolder,
@@ -215,9 +216,10 @@ void ScanOpenTrades()
       if(IsKnownTicket(ticket))
          continue;
 
-      string symbol = OrderSymbol();
+      string baseSym = CT_GetBaseSymbol(OrderSymbol(), SymbolDelimiter);
+      string symbol = CT_SymbolMapLookup(SymbolMapping, baseSym);
 
-      AddKnownTicket(ticket,symbol);
+      AddKnownTicket(ticket, symbol);
 
       GenerateOpenEvent();
    }
