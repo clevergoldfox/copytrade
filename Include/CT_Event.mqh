@@ -1,3 +1,5 @@
+#include <CT_Config.mqh>
+
 #define CT_OPEN 1
 #define CT_CLOSE 2
 
@@ -52,12 +54,24 @@ bool CT_WriteEventFileCommon(
    int ticket
 )
 {
-   FolderCreate(queueFolder, FILE_COMMON);
-
    string safeId = CT_SafeFileName(eventId);
-   string path   = queueFolder + "\\" + safeId + ".evt";
+   string path;
+   int flags = FILE_WRITE | FILE_TXT;
 
-   int h = FileOpen(path, FILE_WRITE | FILE_TXT | FILE_COMMON);
+   if(g_CT_BasePath != "")
+   {
+      string fullFolder = g_CT_BasePath + "\\" + queueFolder;
+      FolderCreate(fullFolder, 0);
+      path = fullFolder + "\\" + safeId + ".evt";
+   }
+   else
+   {
+      FolderCreate(queueFolder, FILE_COMMON);
+      path = queueFolder + "\\" + safeId + ".evt";
+      flags |= FILE_COMMON;
+   }
+
+   int h = FileOpen(path, flags);
 
    if(h == INVALID_HANDLE)
    {

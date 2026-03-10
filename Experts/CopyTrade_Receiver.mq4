@@ -1,5 +1,6 @@
 #property strict
 
+#include <CT_Config.mqh>
 #include <CT_Event.mqh>
 #include <CT_Ledger.mqh>
 #include <CT_Map.mqh>
@@ -10,6 +11,7 @@ input int    スリッページ   = 10;
 input int    受信マジック   = 900001;
 input double ロット倍率     = 1.0;
 input string キューフォルダ = "ct_queue";
+input string 共有フォルダパス = "";   // 2台のMT4で使う時は、両方から見えるフォルダのフルパス（例: D:\CopyTrade）。空欄なら従来どおり同一MT4用。
 input string 銘柄変換       = "";
 
 struct CT_Event
@@ -29,7 +31,9 @@ bool CT_ReadEventFile(string path, CT_Event &ev)
 {
    Print("Receiver: reading event file -> ", path);
 
-   int h = FileOpen(path, FILE_READ | FILE_TXT | FILE_COMMON);
+   int flags = FILE_READ | FILE_TXT;
+   if(StringFind(path, ":") < 0) flags |= FILE_COMMON;
+   int h = FileOpen(path, flags);
 
    if(h == INVALID_HANDLE)
    {
@@ -167,18 +171,33 @@ int ExecuteClose(const CT_Event &ev)
 
 void CT_ProcessQueue()
 {
-   FolderCreate(キューフォルダ, FILE_COMMON);
+   g_CT_BasePath = 共有フォルダパス;
+
+   string queuePath;
+   int findFlag;
+   if(g_CT_BasePath != "")
+   {
+      queuePath = g_CT_BasePath + "\\" + キューフォルダ;
+      FolderCreate(queuePath, 0);
+      findFlag = 0;
+   }
+   else
+   {
+      queuePath = キューフォルダ;
+      FolderCreate(キューフォルダ, FILE_COMMON);
+      findFlag = FILE_COMMON;
+   }
 
    string filename;
 
-   long f = FileFindFirst(キューフォルダ + "\\*.evt", filename, FILE_COMMON);
+   long f = FileFindFirst(queuePath + "\\*.evt", filename, findFlag);
 
    if(f == -1)
       return;   // Queue empty – normal when Sender has no new events
 
    Print("Receiver: found event file -> ", filename);
 
-   string path = キューフォルダ + "\\" + filename;
+   string path = queuePath + "\\" + filename;
 
    CT_Event ev;
 
@@ -193,7 +212,7 @@ void CT_ProcessQueue()
    {
       Print("Receiver: event already processed -> ", ev.eventId);
 
-      FileDelete(path, FILE_COMMON);
+      FileDelete(path, (StringFind(path, ":") >= 0) ? 0 : FILE_COMMON);
 
       FileFindClose(f);
       return;
@@ -207,7 +226,7 @@ void CT_ProcessQueue()
       {
          Print("Receiver: OPEN skipped (already have position for this sender entry, ticket=", existingTicket, ")");
          CT_LedgerAppendDone(ev.eventId, existingTicket);
-         FileDelete(path, FILE_COMMON);
+         FileDelete(path, (StringFind(path, ":") >= 0) ? 0 : FILE_COMMON);
          FileFindClose(f);
          return;
       }
@@ -218,7 +237,7 @@ void CT_ProcessQueue()
       {
          CT_LedgerAppendDone(ev.eventId, t);
 
-         FileDelete(path, FILE_COMMON);
+         FileDelete(path, (StringFind(path, ":") >= 0) ? 0 : FILE_COMMON);
 
          Print("Receiver: OPEN completed");
       }
@@ -232,7 +251,7 @@ void CT_ProcessQueue()
       {
          CT_LedgerAppendDone(ev.eventId, t);
 
-         FileDelete(path, FILE_COMMON);
+         FileDelete(path, (StringFind(path, ":") >= 0) ? 0 : FILE_COMMON);
 
          Print("Receiver: CLOSE completed");
       }
@@ -241,7 +260,7 @@ void CT_ProcessQueue()
          // Orphan CLOSE: no mapped ticket and no order found by comment - consume event to stop infinite retry
          CT_LedgerAppendDone(ev.eventId, 0);
 
-         FileDelete(path, FILE_COMMON);
+         FileDelete(path, (StringFind(path, ":") >= 0) ? 0 : FILE_COMMON);
 
          Print("Receiver: CLOSE skipped (no mapped ticket, event consumed to avoid retry loop)");
       }
@@ -252,6 +271,7 @@ void CT_ProcessQueue()
 
 int OnInit()
 {
+   g_CT_BasePath = 共有フォルダパス;
    Print("CopyTrade_Receiver started");
 
    EventSetTimer(タイマー秒);

@@ -1,8 +1,13 @@
+#include <CT_Config.mqh>
+
 string CT_LEDGER_FILE = "ct_ledger\\ledger.csv";
 
 bool CT_LedgerHas(string eventId)
 {
-   int h = FileOpen(CT_LEDGER_FILE, FILE_READ | FILE_CSV | FILE_COMMON);
+   string path = (g_CT_BasePath != "") ? (g_CT_BasePath + "\\" + CT_LEDGER_FILE) : CT_LEDGER_FILE;
+   int flags = FILE_READ | FILE_CSV;
+   if(g_CT_BasePath == "") flags |= FILE_COMMON;
+   int h = FileOpen(path, flags);
 
    if(h == INVALID_HANDLE)
       return false;
@@ -27,12 +32,16 @@ bool CT_LedgerHas(string eventId)
 
 bool CT_LedgerAppendDone(string eventId,int receiverTicket)
 {
-   FolderCreate("ct_ledger",FILE_COMMON);
+   string path = (g_CT_BasePath != "") ? (g_CT_BasePath + "\\" + CT_LEDGER_FILE) : CT_LEDGER_FILE;
+   int flagsRw = FILE_READ|FILE_WRITE|FILE_CSV;
+   int flagsW = FILE_WRITE|FILE_CSV;
+   if(g_CT_BasePath == "") { flagsRw |= FILE_COMMON; flagsW |= FILE_COMMON; }
+   else FolderCreate(g_CT_BasePath + "\\ct_ledger", 0);
 
-   int h = FileOpen(CT_LEDGER_FILE, FILE_READ|FILE_WRITE|FILE_CSV|FILE_COMMON);
+   int h = FileOpen(path, flagsRw);
 
    if(h==INVALID_HANDLE)
-      h = FileOpen(CT_LEDGER_FILE,FILE_WRITE|FILE_CSV|FILE_COMMON);
+      h = FileOpen(path, flagsW);
    else
       FileSeek(h,0,SEEK_END);
 

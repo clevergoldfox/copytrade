@@ -1,10 +1,12 @@
 #property strict
+#include <CT_Config.mqh>
 #include <CT_Event.mqh>
 #include <CT_Symbol.mqh>
 
 input int    スキャン間隔秒     = 1;
 input int    受信マジック       = 900001;
 input string キューフォルダ     = "ct_queue";
+input string 共有フォルダパス   = "";   // 2台のMT4で使う時は、両方から見えるフォルダのフルパス（例: D:\CopyTrade）。空欄なら従来どおり同一MT4用。
 input string 銘柄区切り         = "";
 input string 銘柄変換           = "";
 
@@ -229,6 +231,7 @@ void ScanOpenTrades()
 // ===== INIT =====
 int OnInit()
 {
+   g_CT_BasePath = 共有フォルダパス;
    Print("CopyTrade_Sender started");
 
    EventSetTimer(スキャン間隔秒);
