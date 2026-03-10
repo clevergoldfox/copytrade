@@ -66,17 +66,19 @@ bool CT_ReadEventFile(string path, CT_Event &ev)
 
 int ExecuteOpen(const CT_Event &ev)
 {
-   Print("Receiver: executing OPEN trade");
+   Print("Receiver: executing OPEN trade (inverted)");
 
    RefreshRates();
 
    double lot = ev.lots * LotMultiplier;
 
-   double price = (ev.cmd==OP_BUY) ? Ask : Bid;
+   // Invert: Sender BUY -> Receiver SELL, Sender SELL -> Receiver BUY
+   int receiverCmd = (ev.cmd == OP_BUY) ? OP_SELL : OP_BUY;
+   double price = (receiverCmd == OP_BUY) ? Ask : Bid;
 
    int ticket = OrderSend(
       ev.symbol,
-      ev.cmd,
+      receiverCmd,
       lot,
       price,
       Slippage,
@@ -196,6 +198,17 @@ void CT_ProcessQueue()
 
    if(ev.typeStr=="OPEN")
    {
+      // Duplicate prevention: already have an open position for this sender entry -> skip open, consume event
+      int existingTicket = FindReceiverOrderByComment(ev.senderLogin, ev.ticket);
+      if(existingTicket > 0)
+      {
+         Print("Receiver: OPEN skipped (already have position for this sender entry, ticket=", existingTicket, ")");
+         CT_LedgerAppendDone(ev.eventId, existingTicket);
+         FileDelete(path, FILE_COMMON);
+         FileFindClose(f);
+         return;
+      }
+
       int t = ExecuteOpen(ev);
 
       if(t > 0)
