@@ -162,8 +162,6 @@ int ExecuteClose(const CT_Event &ev)
 
 void CT_ProcessQueue()
 {
-   Print("Receiver: checking queue folder -> ", QueueFolder);
-
    FolderCreate(QueueFolder, FILE_COMMON);
 
    string filename;
@@ -171,10 +169,7 @@ void CT_ProcessQueue()
    long f = FileFindFirst(QueueFolder + "\\*.evt", filename, FILE_COMMON);
 
    if(f == -1)
-   {
-      Print("Receiver: no event file found");
-      return;
-   }
+      return;   // Queue empty – normal when Sender has no new events
 
    Print("Receiver: found event file -> ", filename);
 
@@ -255,7 +250,5 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
-   Print("Receiver: timer tick");
-
    CT_ProcessQueue();
 }
