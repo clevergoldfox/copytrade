@@ -2,11 +2,11 @@
 #include <CT_Event.mqh>
 #include <CT_Symbol.mqh>
 
-input int    ScanIntervalSeconds = 1;
-input int    ReceiverMagic       = 900001;
-input string QueueFolder         = "ct_queue";
-input string SymbolDelimiter     = "";       // e.g. "-" for XAUUSD-cd, "." for XAUUSD.oj5k. Empty if no suffix.
-input string SymbolMapping      = "";       // e.g. GOLD=XAUUSD. Comma for multiple. Set on Sender OR Receiver, not both.
+input int    スキャン間隔秒     = 1;
+input int    受信マジック       = 900001;
+input string キューフォルダ     = "ct_queue";
+input string 銘柄区切り         = "";
+input string 銘柄変換           = "";
 
 // ===== Storage =====
 int    KnownTickets[5000];
@@ -55,7 +55,7 @@ void AddKnownTicket(int ticket,string symbol)
 // ===== Detect receiver trades to ignore =====
 bool IsReceiverTrade()
 {
-   if(OrderMagicNumber()==ReceiverMagic)
+   if(OrderMagicNumber()==受信マジック)
       return true;
 
    if(StringFind(OrderComment(),"SRC:")==0)
@@ -102,7 +102,7 @@ void GenerateOpenEvent()
 
    int ticket          = OrderTicket();
    datetime openTime   = OrderOpenTime();
-   string symbol       = CT_SymbolMapLookup(SymbolMapping, CT_GetBaseSymbol(OrderSymbol(), SymbolDelimiter));
+   string symbol       = CT_SymbolMapLookup(銘柄変換, CT_GetBaseSymbol(OrderSymbol(), 銘柄区切り));
    double lots         = OrderLots();
    double price        = OrderOpenPrice();
    int cmd             = OrderType();
@@ -120,7 +120,7 @@ void GenerateOpenEvent()
    Print("Sender: OPEN event ", eventId);
 
    if(!CT_WriteEventFileCommon(
-      QueueFolder,
+      キューフォルダ,
       eventId,
       CT_OPEN,
       cmd,
@@ -163,7 +163,7 @@ void GenerateCloseEvent(int ticket,string symbol)
    Print("Sender: CLOSE event ",eventId);
 
    CT_WriteEventFileCommon(
-      QueueFolder,
+      キューフォルダ,
       eventId,
       CT_CLOSE,
       0,
@@ -216,8 +216,8 @@ void ScanOpenTrades()
       if(IsKnownTicket(ticket))
          continue;
 
-      string baseSym = CT_GetBaseSymbol(OrderSymbol(), SymbolDelimiter);
-      string symbol = CT_SymbolMapLookup(SymbolMapping, baseSym);
+      string baseSym = CT_GetBaseSymbol(OrderSymbol(), 銘柄区切り);
+      string symbol = CT_SymbolMapLookup(銘柄変換, baseSym);
 
       AddKnownTicket(ticket, symbol);
 
@@ -231,7 +231,7 @@ int OnInit()
 {
    Print("CopyTrade_Sender started");
 
-   EventSetTimer(ScanIntervalSeconds);
+   EventSetTimer(スキャン間隔秒);
 
    return(INIT_SUCCEEDED);
 }

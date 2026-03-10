@@ -5,12 +5,12 @@
 #include <CT_Map.mqh>
 #include <CT_Symbol.mqh>
 
-input int TimerSeconds = 1;
-input int Slippage = 10;
-input int ReceiverMagic = 900001;
-input double LotMultiplier = 1.0;
-input string QueueFolder = "ct_queue";
-input string SymbolMapping = "";   // e.g. XAUUSD=GOLD. Comma for multiple. Set on Sender OR Receiver, not both.
+input int    タイマー秒     = 1;
+input int    スリッページ   = 10;
+input int    受信マジック   = 900001;
+input double ロット倍率     = 1.0;
+input string キューフォルダ = "ct_queue";
+input string 銘柄変換       = "";
 
 struct CT_Event
 {
@@ -72,8 +72,8 @@ int ExecuteOpen(const CT_Event &ev)
 
    RefreshRates();
 
-   string symbolForOrder = CT_SymbolMapLookup(SymbolMapping, ev.symbol);
-   double lot = ev.lots * LotMultiplier;
+   string symbolForOrder = CT_SymbolMapLookup(銘柄変換, ev.symbol);
+   double lot = ev.lots * ロット倍率;
 
    // Invert: Sender BUY -> Receiver SELL, Sender SELL -> Receiver BUY
    int receiverCmd = (ev.cmd == OP_BUY) ? OP_SELL : OP_BUY;
@@ -84,11 +84,11 @@ int ExecuteOpen(const CT_Event &ev)
       receiverCmd,
       lot,
       price,
-      Slippage,
+      スリッページ,
       0,
       0,
       "SRC:"+IntegerToString(ev.senderLogin)+"|T:"+IntegerToString(ev.ticket),
-      ReceiverMagic,
+      受信マジック,
       0
    );
 
@@ -114,7 +114,7 @@ int FindReceiverOrderByComment(int senderLogin, int senderTicket)
    {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
          continue;
-      if(OrderMagicNumber() != ReceiverMagic)
+      if(OrderMagicNumber() != 受信マジック)
          continue;
       if(OrderType() != OP_BUY && OrderType() != OP_SELL)
          continue;
@@ -151,7 +151,7 @@ int ExecuteClose(const CT_Event &ev)
 
    double price = (OrderType()==OP_BUY) ? Bid : Ask;
 
-   if(OrderClose(receiverTicket, OrderLots(), price, Slippage))
+   if(OrderClose(receiverTicket, OrderLots(), price, スリッページ))
    {
       Print("Receiver: trade closed ticket=", receiverTicket);
 
@@ -167,18 +167,18 @@ int ExecuteClose(const CT_Event &ev)
 
 void CT_ProcessQueue()
 {
-   FolderCreate(QueueFolder, FILE_COMMON);
+   FolderCreate(キューフォルダ, FILE_COMMON);
 
    string filename;
 
-   long f = FileFindFirst(QueueFolder + "\\*.evt", filename, FILE_COMMON);
+   long f = FileFindFirst(キューフォルダ + "\\*.evt", filename, FILE_COMMON);
 
    if(f == -1)
       return;   // Queue empty – normal when Sender has no new events
 
    Print("Receiver: found event file -> ", filename);
 
-   string path = QueueFolder + "\\" + filename;
+   string path = キューフォルダ + "\\" + filename;
 
    CT_Event ev;
 
@@ -254,7 +254,7 @@ int OnInit()
 {
    Print("CopyTrade_Receiver started");
 
-   EventSetTimer(TimerSeconds);
+   EventSetTimer(タイマー秒);
 
    return(INIT_SUCCEEDED);
 }
