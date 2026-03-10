@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CopyTrade EA（MT4）</title>
+  <style>
+    body { font-family: "Helvetica Neue", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; line-height: 1.6; max-width: 720px; margin: 0 auto; padding: 24px; color: #333; }
+    h1 { font-size: 1.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+    h2 { font-size: 1.2rem; margin-top: 1.5em; }
+    h3 { font-size: 1rem; margin-top: 1em; }
+    table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+    th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+    th { background: #f5f5f5; }
+    pre, code { background: #f5f5f5; font-family: Consolas, "Courier New", monospace; font-size: 0.9em; }
+    pre { padding: 12px; overflow-x: auto; border-radius: 4px; }
+    code { padding: 2px 6px; border-radius: 3px; }
+    ul { margin: 0.5em 0; padding-left: 1.5em; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 1.5em 0; }
+    strong { font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<h1>CopyTrade EA（MT4）</h1>
+
+<p>MT4用のエキスパートアドバイザです。<strong>ファイルキュー</strong>で、1つの口座（送信側）のトレードを別口座（受信側）にコピーします。ターミナル間のネットワークやブローカーAPIは不要で、両方のMT4が<strong>同じCommonフォルダ</strong>を参照する必要があります（同一PCまたは共有ドライブ）。</p>
+
+<ul>
+  <li><strong>反転トレード:</strong> 送信側BUY → 受信側SELL、送信側SELL → 受信側BUY。</li>
+  <li><strong>複数送信・1受信:</strong> 1つの受信口座で複数の送信口座をフォロー可能。</li>
+  <li><strong>重複防止:</strong> 1つの送信エントリーに対して受信側のポジションは最大1つまで。</li>
+</ul>
+
+<hr>
+
+<h2>フォルダ構成</h2>
+
+<pre>copytrade/
+├── Experts/
+│   ├── CopyTrade_Sender.mq4   ← コピー元口座のチャートに設置
+│   └── CopyTrade_Receiver.mq4 ← コピー先口座のチャートに設置
+├── Include/
+│   ├── CT_Event.mqh
+│   ├── CT_Ledger.mqh
+│   ├── CT_Map.mqh
+│   └── CT_Symbol.mqh
+└── README.md</pre>
+
+<p><code>Experts/*.mq4</code> と <code>Include/*.mqh</code> をMT4の <code>MQL4</code> フォルダにコピーし、インクルードが参照できるようにしてください。</p>
+
+<hr>
+
+<h2>送信側（CopyTrade_Sender）</h2>
+
+<p><strong>コピー元</strong>口座で動作します。建玉・決済を監視し、OPEN/CLOSEイベントをキュー用フォルダに書き出します。受信側が開いた注文（マジック番号およびコメント <code>SRC:</code>）は無視します。</p>
+
+<table>
+  <thead>
+    <tr><th>パラメータ</th><th>説明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>ScanIntervalSeconds</strong></td><td>スキャン間隔（秒）。既定値 1。</td></tr>
+    <tr><td><strong>ReceiverMagic</strong></td><td>受信側のマジック番号と一致させる（コピー注文を無視するため）。既定値 900001。</td></tr>
+    <tr><td><strong>QueueFolder</strong></td><td>Common配下のイベント用フォルダ名。既定値 <code>ct_queue</code>。</td></tr>
+    <tr><td><strong>SymbolDelimiter</strong></td><td>チャート銘柄に接尾語がある場合（例: <code>XAUUSD-cd</code>）、区切り文字（例: <code>-</code>）を指定。イベントにはベース銘柄名が送信されます。接尾語がない場合は空欄。</td></tr>
+    <tr><td><strong>SymbolMapping</strong></td><td>銘柄変換（例: <code>GOLD=XAUUSD</code>）。複数はカンマ区切り。送信側か受信側のどちらか一方のみで設定すること。</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>受信側（CopyTrade_Receiver）</h2>
+
+<p><strong>コピー先</strong>口座で動作します。キューからイベントファイルを読み、注文のオープン・クローズを実行します。台帳とマップで同一イベントの二重実行を防ぎ、CLOSE時に正しいポジションを特定します。</p>
+
+<table>
+  <thead>
+    <tr><th>パラメータ</th><th>説明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>TimerSeconds</strong></td><td>キュー確認間隔（秒）。既定値 1。</td></tr>
+    <tr><td><strong>Slippage</strong></td><td>OrderSend/OrderClose の最大スリッページ。既定値 10。</td></tr>
+    <tr><td><strong>ReceiverMagic</strong></td><td>コピー注文のマジック番号。既定値 900001。送信側の設定と一致させる。</td></tr>
+    <tr><td><strong>LotMultiplier</strong></td><td>ロット倍率（受信ロット = 送信ロット × この値）。既定値 1.0。</td></tr>
+    <tr><td><strong>QueueFolder</strong></td><td>送信側と同じフォルダ名。既定値 <code>ct_queue</code>。</td></tr>
+    <tr><td><strong>SymbolMapping</strong></td><td>イベントの銘柄を受信側銘柄に変換（例: <code>XAUUSD=GOLD</code>）。複数はカンマ区切り。送信側か受信側のどちらか一方のみで設定すること。</td></tr>
+  </tbody>
+</table>
+
+<p>受信側の注文コメントは <code>SRC:&lt;送信口座ログイン&gt;|T:&lt;送信側チケット&gt;</code> となり、どの送信エントリーか識別できます。</p>
+
+<hr>
+
+<h2>銘柄の区切り文字と変換</h2>
+
+<h3>区切り文字（送信側）</h3>
+
+<p>ブローカーによっては <code>XAUUSD-cd</code> や <code>USDJPY.oj5k</code> のように、ベース銘柄＋区切り文字＋接尾語になっている場合があります。<strong>SymbolDelimiter</strong> を設定すると、イベントには<strong>ベース銘柄</strong>が送信されます。</p>
+
+<ul>
+  <li><code>XAUUSD-cd</code> → 区切り文字 <code>-</code> → イベント銘柄 <code>XAUUSD</code></li>
+  <li><code>USDJPY.oj5k</code> → 区切り文字 <code>.</code> → イベント銘柄 <code>USDJPY</code></li>
+  <li><code>XAUUSD</code>（接尾語なし）→ SymbolDelimiter は<strong>空欄</strong></li>
+</ul>
+
+<h3>銘柄変換（どちらか一方のみ）</h3>
+
+<p><strong>SymbolMapping</strong> は<strong>送信側か受信側のどちらか一方</strong>で設定してください。両方では設定しないでください。</p>
+
+<ul>
+  <li><strong>送信側:</strong> 「自口座の銘柄」→「イベントに書く銘柄」<br>例: 送信側チャートが <code>GOLD</code>、受信側ブローカーが <code>XAUUSD</code> の場合 → 送信側で SymbolMapping に <code>GOLD=XAUUSD</code> を設定。</li>
+  <li><strong>受信側:</strong> 「イベントの銘柄」→「自口座の銘柄」<br>例: イベントが <code>XAUUSD</code>、受信側チャートが <code>GOLD</code> の場合 → 受信側で SymbolMapping に <code>XAUUSD=GOLD</code> を設定。</li>
+</ul>
+
+<p>形式: <code>KEY=VALUE</code>。複数: <code>GOLD=XAUUSD,SILVER=XAGUSD</code>。</p>
+
+<p>受信側ブローカーが接尾語付き銘柄（例: <code>XAUUSD.oj5k</code>）を使う場合は、受信側で <code>XAUUSD=XAUUSD.oj5k</code> のように設定してください。</p>
+
+<hr>
+
+<h2>動作条件</h2>
+
+<ul>
+  <li>両方のターミナルがキュー（および台帳・マップ）用に<strong>同じCommonパス</strong>を参照していること。同一PCまたは共有ドライブが一般的です。</li>
+  <li>送信側と受信側で <strong>QueueFolder</strong> と <strong>ReceiverMagic</strong> を同じ値にすること。</li>
+  <li>ブローカー間で銘柄名が異なる場合は、<strong>SymbolMapping</strong> をどちらか一方で設定し、送信側銘柄に接尾語がある場合は送信側で <strong>SymbolDelimiter</strong> も設定してください。</li>
+</ul>
+
+<hr>
+
+<h2>データファイル（Commonパス）</h2>
+
+<ul>
+  <li><strong>ct_queue/</strong> — イベントファイル（<code>.evt</code>）。送信側が作成し、受信側が読み取り後に削除。</li>
+  <li><strong>ct_ledger/</strong> — 処理済みイベントID（二重実行防止用）。</li>
+  <li><strong>ct_map/</strong> — 送信側（ログイン・チケット）→ 受信側チケット（CLOSE用）。</li>
+</ul>
+
+<p>EA稼働中は、継続運用に必要な限りこれらのフォルダ・ファイルを削除しないでください。</p>
+
+</body>
+</html>
